@@ -11,7 +11,7 @@ def patch(file_path, old_str, new_str):
         f.write(content)
     print(f"[+] Patched {file_path}")
 
-# 1. MessagesLoader.java — убираем рекламу каналов
+# 1. MessagesLoader.java — глушим рекламу каналов
 patch(
     'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java',
     'private boolean canShowSponsoredMessage (long chatId) {',
@@ -25,7 +25,7 @@ patch(
     'public boolean canBeSaved () {\n    if (true) return true;'
 )
 
-# 3. MessagesController.java — скриншоты везде + глушим статус печатает
+# 3. MessagesController.java — скриншоты везде + статус "печатает"
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
     'public final boolean shouldDisallowScreenshots () {',
@@ -58,11 +58,16 @@ patch(
     'new TdApi.OptionValueBoolean(true))'
 )
 
-# 7. Tdlib.java — заглушка Play Integrity API
+# 7. Tdlib.java — глушим Play Integrity и ReCaptcha
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {',
     'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("PLAYINTEGRITY_FAILED_NOT_SUPPORTED");\n    if (true) return;'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'public void requestRecaptcha (long verificationId, String action, String recaptchaKeyId, ApplicationVerificationCallback callback) {',
+    'public void requestRecaptcha (long verificationId, String action, String recaptchaKeyId, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("RECAPTCHA_FAILED_NOT_SUPPORTED");\n    if (true) return;'
 )
 
 # 8. Tdlib.java — подмена отпечатка подписи на оригинальный от Вячеслава Крылова
@@ -72,9 +77,14 @@ patch(
     'params.put("data", "66462134345a6adac3c1d5aea9cef0421b7cab68");'
 )
 
-# 9. Tdlib.java — отмена сетевой телеметрии OpenChat и CloseChat
-# Заменяем на мгновенный локальный TdApi.SetAlarm(0) — нулевой сетевой трафик, 
-# штатный вызов колбэков, никаких сломанных скобок!
+# 9. Tdlib.java — принудительно отдаем серверу официальное имя пакета
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'params.put("package_id", context.getPackageName());',
+    'params.put("package_id", "org.thunderdog.challegram");'
+)
+
+# 10. Tdlib.java — отмена сетевой телеметрии OpenChat и CloseChat (через SetAlarm(0))
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'new TdApi.OpenChat(chatId)',
