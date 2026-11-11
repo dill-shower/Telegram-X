@@ -69,112 +69,77 @@ jobs:
           telegram.api_hash=3e0cb5efcd52300aec5913f0008670bc
           EOF
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
       - name: Validate Git Setup
         run: ./gradlew :app:validateGitSetup
 
-      - name: Apply All Custom Privacy, Anti-Ad & Camouflage Patches
+      - name: Apply Exact In-Place Patches
         run: |
           python3 - << 'EOF'
-          import re
+          def patch_file(path, replacements):
+              with open(path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              for old, new in replacements:
+                  if old not in content:
+                      print(f"[!] Warning: pattern not found in {path}:\n{old[:60]}...")
+                  else:
+                      content = content.replace(old, new, 1)
+                      print(f"[+] Replaced in {path}")
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(content)
 
-          # 1. MessagesLoader.java (вырезаем рекламу каналов)
-          p = 'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java'
-          with open(p, 'r', encoding='utf-8') as f:
-              s = f.read()
-          s = re.sub(
-              r'private boolean canShowSponsoredMessage \([^\)]*\)\s*\{[\s\S]*?\}',
-              'private boolean canShowSponsoredMessage (long chatId) {\n    return false;\n  }',
-              s, count=1
-          )
-          with open(p, 'w', encoding='utf-8') as f:
-              f.write(s)
-          print("[+] MessagesLoader.java patched")
+          # 1. MessagesLoader.java — убираем рекламу каналов
+          patch_file('app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java', [
+              ('private boolean canShowSponsoredMessage (long chatId) {\n    return tdlib.isChannel(chatId)',
+               'private boolean canShowSponsoredMessage (long chatId) {\n    if (true) return false;\n    return tdlib.isChannel(chatId)')
+          ])
 
-          # 2. TGMessage.java (разрешаем копирование и скачивание всего отовсюду)
-          p = 'app/src/main/java/org/thunderdog/challegram/data/TGMessage.java'
-          with open(p, 'r', encoding='utf-8') as f:
-              s = f.read()
-          s = re.sub(
-              r'public boolean canBeSaved \(\)\s*\{[\s\S]*?\}',
-              'public boolean canBeSaved () {\n    return true;\n  }',
-              s, count=1
-          )
-          with open(p, 'w', encoding='utf-8') as f:
-              f.write(s)
-          print("[+] TGMessage.java patched")
+          # 2. TGMessage.java — разрешаем сохранение и копирование всего
+          patch_file('app/src/main/java/org/thunderdog/challegram/data/TGMessage.java', [
+              ('public boolean canBeSaved () {\n    return message != null && message.canBeSaved;',
+               'public boolean canBeSaved () {\n    if (true) return true;\n    return message != null && message.canBeSaved;')
+          ])
 
-          # 3. MessagesController.java (скриншоты + выключение статуса печатает)
-          p = 'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java'
-          with open(p, 'r', encoding='utf-8') as f:
-              s = f.read()
-          s = re.sub(
-              r'public final boolean shouldDisallowScreenshots \(\)\s*\{[\s\S]*?\}',
-              'public final boolean shouldDisallowScreenshots () {\n    return false;\n  }',
-              s, count=1
-          )
-          s = s.replace(
-              'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {',
-              'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;'
-          )
-          with open(p, 'w', encoding='utf-8') as f:
-              f.write(s)
-          print("[+] MessagesController.java patched")
+          # 3. MessagesController.java — скриншоты везде + глушим статус "печатает"
+          patch_file('app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java', [
+              ('public final boolean shouldDisallowScreenshots () {\n    return !Config.ENABLE_TEST_HOOKS',
+               'public final boolean shouldDisallowScreenshots () {\n    if (true) return false;\n    return !Config.ENABLE_TEST_HOOKS'),
+              ('public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (chat == null) {',
+               'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;\n    if (chat == null) {')
+          ])
 
-          # 4. Tdlib.java (Premium, Play Integrity, маскировка SHA-1, отмена OpenChat/CloseChat)
-          p = 'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java'
-          with open(p, 'r', encoding='utf-8') as f:
-              s = f.read()
-          # Client Premium
-          s = re.sub(
-              r'public boolean hasPremium \(\)\s*\{[\s\S]*?\}',
-              'public boolean hasPremium () {\n    return true;\n  }',
-              s, count=1
-          )
-          # Sensitive content / NSFW
-          s = re.sub(
-              r'public boolean ignoreSensitiveContentRestrictions \(\)\s*\{[\s\S]*?\}',
-              'public boolean ignoreSensitiveContentRestrictions () {\n    return true;\n  }',
-              s, count=1
-          )
-          # Platform restrictions
-          s = s.replace(
-              'new TdApi.OptionValueBoolean(AppInstallationUtil.isAppSideLoaded(AppContext.get())))',
-              'new TdApi.OptionValueBoolean(true))'
-          )
-          # Screen capture in media viewer
-          s = re.sub(
-              r'public void onScreenshotTaken \([^\)]*\)\s*\{[\s\S]*?ui\(\)\.execute\([\s\S]*?\}\);[\s\S]*?\}',
-              'public void onScreenshotTaken (int timeSeconds) {\n  }',
-              s, count=1
-          )
-          # Play Integrity stub
-          s = re.sub(
-              r'public void requestPlayIntegrity \([^\)]*\)\s*\{[\s\S]*?public void requestRecaptcha',
-              'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("PLAYINTEGRITY_FAILED_NOT_SUPPORTED");\n  }\n\n  public void requestRecaptcha',
-              s, count=1
-          )
-          # Camouflage fingerprint
-          s = re.sub(
-              r'String fingerprint = U\.getApkFingerprint\("SHA1", false\);[\s\S]*?params\.put\("data", fingerprint\);[\s\S]*?\}',
-              'params.put("data", "66462134345a6adac3c1d5aea9cef0421b7cab68");',
-              s, count=1
-          )
-          # Remove OpenChat / CloseChat telemetry
-          s = s.replace(
-              'client().send(new TdApi.OpenChat(chatId)',
-              '// client().send(new TdApi.OpenChat(chatId)'
-          )
-          s = s.replace(
-              'client().send(new TdApi.CloseChat(chatId)',
-              '// client().send(new TdApi.CloseChat(chatId)'
-          )
-          with open(p, 'w', encoding='utf-8') as f:
-              f.write(s)
-          print("[+] Tdlib.java patched")
+          # 4. Tdlib.java — Premium, отпечаток подписи, цензура, Play Integrity
+          patch_file('app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java', [
+              # Client-side Premium
+              ('public boolean hasPremium () {\n    TdApi.User user = cache().myUser();',
+               'public boolean hasPremium () {\n    if (true) return true;\n    TdApi.User user = cache().myUser();'),
+
+              # Снятие ограничений NSFW / Sensitive
+              ('public boolean ignoreSensitiveContentRestrictions () {\n    return options.ignoreSensitiveContentRestrictions;',
+               'public boolean ignoreSensitiveContentRestrictions () {\n    if (true) return true;\n    return options.ignoreSensitiveContentRestrictions;'),
+
+              # Снятие ограничений платформы
+              ('new TdApi.OptionValueBoolean(AppInstallationUtil.isAppSideLoaded(AppContext.get())))',
+               'new TdApi.OptionValueBoolean(true))'),
+
+              # Подделка официального отпечатка подписи Вячеслава Крылова
+              ('String fingerprint = U.getApkFingerprint("SHA1", false);\n    if (!StringUtils.isEmpty(fingerprint)) {\n      params.put("data", fingerprint);\n    }',
+               'params.put("data", "66462134345a6adac3c1d5aea9cef0421b7cab68");'),
+
+              # Заглушка Play Integrity API
+              ('public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    TDLib.Tag.playIntegrity',
+               'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("PLAYINTEGRITY_FAILED_NOT_SUPPORTED");\n    if (true) return;\n    TDLib.Tag.playIntegrity'),
+
+              # Отмена телеметрии OpenChat и CloseChat
+              ('client().send(new TdApi.OpenChat(chatId),',
+               '// client().send(new TdApi.OpenChat(chatId),'),
+              ('client().send(new TdApi.CloseChat(chatId), okHandler());',
+               '// client().send(new TdApi.CloseChat(chatId), okHandler());')
+          ])
+          print("Done patching.")
           EOF
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Debug APK
         run: |
