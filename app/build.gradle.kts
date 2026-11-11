@@ -759,9 +759,6 @@ android {
 
   androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
-      if (!config.isExperimentalBuild) {
-        variant.lifecycleTasks.registerPreBuild(validateApiTokens)
-      }
       variant.sources.res?.addGeneratedSourceDirectory(
         fetchLocalizedStrings, FetchLocalizedStringsTask::resOutputDir
       )
