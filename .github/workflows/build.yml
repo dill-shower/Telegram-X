@@ -1,0 +1,190 @@
+name: Build Telegram X
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'Target ABI (e.g. arm64, arm32, x64)'
+        required: true
+        default: 'arm64'
+
+env:
+  TERM: xterm
+  RUSTUP_HOME: /home/runner/.rustup
+  CARGO_HOME: /home/runner/.cargo
+
+jobs:
+  build:
+    name: Build APK (${{ github.event.inputs.abi || 'arm64' }})
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository with Submodules and LFS
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+          fetch-depth: 1
+
+      - name: Expand Swap Space (Prevent OOM)
+        run: |
+          sudo swapoff -a
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+
+      - name: Setup Exact Rust Toolchain & Targets
+        run: |
+          RUST_VERSION=$(grep "^version.rust=" version.properties | cut -d'=' -f2 | tr -d '\r\n ')
+          echo "Target Rust version: $RUST_VERSION"
+
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+          rustup target add aarch64-linux-android --toolchain "$RUST_VERSION"
+          rustup target add armv7-linux-androideabi --toolchain "$RUST_VERSION"
+          rustup target add x86_64-linux-android --toolchain "$RUST_VERSION"
+          rustup target add i686-linux-android --toolchain "$RUST_VERSION"
+          rustup component add llvm-tools --toolchain "$RUST_VERSION" || true
+
+          chmod +x scripts/setup-rust.sh
+          ./scripts/setup-rust.sh || true
+
+          echo "$CARGO_HOME/bin" >> $GITHUB_PATH
+
+          cat <<EOF > local.properties
+          sdk.dir=$ANDROID_HOME
+          rust.dir=$RUSTUP_HOME
+          telegram.api_id=21724
+          telegram.api_hash=3e0cb5efcd52300aec5913f0008670bc
+          EOF
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate Git Setup
+        run: ./gradlew :app:validateGitSetup
+
+      - name: Apply All Custom Privacy, Anti-Ad & Camouflage Patches
+        run: |
+          python3 - << 'EOF'
+          import re
+
+          # 1. MessagesLoader.java (вырезаем рекламу каналов)
+          p = 'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java'
+          with open(p, 'r', encoding='utf-8') as f:
+              s = f.read()
+          s = re.sub(
+              r'private boolean canShowSponsoredMessage \([^\)]*\)\s*\{[\s\S]*?\}',
+              'private boolean canShowSponsoredMessage (long chatId) {\n    return false;\n  }',
+              s, count=1
+          )
+          with open(p, 'w', encoding='utf-8') as f:
+              f.write(s)
+          print("[+] MessagesLoader.java patched")
+
+          # 2. TGMessage.java (разрешаем копирование и скачивание всего отовсюду)
+          p = 'app/src/main/java/org/thunderdog/challegram/data/TGMessage.java'
+          with open(p, 'r', encoding='utf-8') as f:
+              s = f.read()
+          s = re.sub(
+              r'public boolean canBeSaved \(\)\s*\{[\s\S]*?\}',
+              'public boolean canBeSaved () {\n    return true;\n  }',
+              s, count=1
+          )
+          with open(p, 'w', encoding='utf-8') as f:
+              f.write(s)
+          print("[+] TGMessage.java patched")
+
+          # 3. MessagesController.java (скриншоты + выключение статуса печатает)
+          p = 'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java'
+          with open(p, 'r', encoding='utf-8') as f:
+              s = f.read()
+          s = re.sub(
+              r'public final boolean shouldDisallowScreenshots \(\)\s*\{[\s\S]*?\}',
+              'public final boolean shouldDisallowScreenshots () {\n    return false;\n  }',
+              s, count=1
+          )
+          s = s.replace(
+              'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {',
+              'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;'
+          )
+          with open(p, 'w', encoding='utf-8') as f:
+              f.write(s)
+          print("[+] MessagesController.java patched")
+
+          # 4. Tdlib.java (Premium, Play Integrity, маскировка SHA-1, отмена OpenChat/CloseChat)
+          p = 'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java'
+          with open(p, 'r', encoding='utf-8') as f:
+              s = f.read()
+          # Client Premium
+          s = re.sub(
+              r'public boolean hasPremium \(\)\s*\{[\s\S]*?\}',
+              'public boolean hasPremium () {\n    return true;\n  }',
+              s, count=1
+          )
+          # Sensitive content / NSFW
+          s = re.sub(
+              r'public boolean ignoreSensitiveContentRestrictions \(\)\s*\{[\s\S]*?\}',
+              'public boolean ignoreSensitiveContentRestrictions () {\n    return true;\n  }',
+              s, count=1
+          )
+          # Platform restrictions
+          s = s.replace(
+              'new TdApi.OptionValueBoolean(AppInstallationUtil.isAppSideLoaded(AppContext.get())))',
+              'new TdApi.OptionValueBoolean(true))'
+          )
+          # Screen capture in media viewer
+          s = re.sub(
+              r'public void onScreenshotTaken \([^\)]*\)\s*\{[\s\S]*?ui\(\)\.execute\([\s\S]*?\}\);[\s\S]*?\}',
+              'public void onScreenshotTaken (int timeSeconds) {\n  }',
+              s, count=1
+          )
+          # Play Integrity stub
+          s = re.sub(
+              r'public void requestPlayIntegrity \([^\)]*\)\s*\{[\s\S]*?public void requestRecaptcha',
+              'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("PLAYINTEGRITY_FAILED_NOT_SUPPORTED");\n  }\n\n  public void requestRecaptcha',
+              s, count=1
+          )
+          # Camouflage fingerprint
+          s = re.sub(
+              r'String fingerprint = U\.getApkFingerprint\("SHA1", false\);[\s\S]*?params\.put\("data", fingerprint\);[\s\S]*?\}',
+              'params.put("data", "66462134345a6adac3c1d5aea9cef0421b7cab68");',
+              s, count=1
+          )
+          # Remove OpenChat / CloseChat telemetry
+          s = s.replace(
+              'client().send(new TdApi.OpenChat(chatId)',
+              '// client().send(new TdApi.OpenChat(chatId)'
+          )
+          s = s.replace(
+              'client().send(new TdApi.CloseChat(chatId)',
+              '// client().send(new TdApi.CloseChat(chatId)'
+          )
+          with open(p, 'w', encoding='utf-8') as f:
+              f.write(s)
+          print("[+] Tdlib.java patched")
+          EOF
+
+      - name: Build Debug APK
+        run: |
+          ABI="${{ github.event.inputs.abi || 'arm64' }}"
+          chmod +x gradlew
+          ./gradlew :app:assembleLatestDebug -Pabi=$ABI --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-X-${{ github.event.inputs.abi || 'arm64' }}
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 14
