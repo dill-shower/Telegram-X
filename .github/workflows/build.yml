@@ -77,17 +77,17 @@ jobs:
           python3 - << 'EOF'
           def patch_file(path, replacements):
               with open(path, 'r', encoding='utf-8') as f:
-                  content = f.read()
+                  content = f.read().replace('\r\n', '\n')
               for old, new in replacements:
                   if old not in content:
-                      print(f"[!] Warning: pattern not found in {path}:\n{old[:60]}...")
-                  else:
-                      content = content.replace(old, new, 1)
-                      print(f"[+] Replaced in {path}")
+                      print(f"[!] ERROR: Target block not found in {path}:\n{old[:80]}...")
+                      exit(1)
+                  content = content.replace(old, new, 1)
+                  print(f"[+] Successfully patched: {path}")
               with open(path, 'w', encoding='utf-8') as f:
                   f.write(content)
 
-          # 1. MessagesLoader.java — убираем рекламу каналов
+          # 1. MessagesLoader.java — глушим рекламу каналов
           patch_file('app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java', [
               ('private boolean canShowSponsoredMessage (long chatId) {\n    return tdlib.isChannel(chatId)',
                'private boolean canShowSponsoredMessage (long chatId) {\n    if (true) return false;\n    return tdlib.isChannel(chatId)')
@@ -99,7 +99,7 @@ jobs:
                'public boolean canBeSaved () {\n    if (true) return true;\n    return message != null && message.canBeSaved;')
           ])
 
-          # 3. MessagesController.java — скриншоты везде + глушим статус "печатает"
+          # 3. MessagesController.java — скриншоты везде + глушим статус печатает
           patch_file('app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java', [
               ('public final boolean shouldDisallowScreenshots () {\n    return !Config.ENABLE_TEST_HOOKS',
                'public final boolean shouldDisallowScreenshots () {\n    if (true) return false;\n    return !Config.ENABLE_TEST_HOOKS'),
@@ -107,7 +107,16 @@ jobs:
                'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;\n    if (chat == null) {')
           ])
 
-          # 4. Tdlib.java — Premium, отпечаток подписи, цензура, Play Integrity
+          # 4. Tdlib.java — чистый 4-строчный патч OpenChat, CloseChat, Premium, SHA-1, Play Integrity
+          open_chat_old = """        client().send(new TdApi.OpenChat(chatId), after != null ? result -> {
+          okHandler.onResult(result);
+          after.run();
+        } : okHandler);"""
+
+          open_chat_new = """        if (after != null) {
+          after.run();
+        }"""
+
           patch_file('app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java', [
               # Client-side Premium
               ('public boolean hasPremium () {\n    TdApi.User user = cache().myUser();',
@@ -129,17 +138,15 @@ jobs:
               ('public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    TDLib.Tag.playIntegrity',
                'public void requestPlayIntegrity (long verificationId, String nonce, ApplicationVerificationCallback callback) {\n    callback.onApplicationVerificationResult("PLAYINTEGRITY_FAILED_NOT_SUPPORTED");\n    if (true) return;\n    TDLib.Tag.playIntegrity'),
 
-              # Отмена телеметрии OpenChat и CloseChat
-              ('client().send(new TdApi.OpenChat(chatId),',
-               '// client().send(new TdApi.OpenChat(chatId),'),
+              # Полная корректная замена блока OpenChat (без сломанных скобок)
+              (open_chat_old, open_chat_new),
+
+              # Отмена CloseChat
               ('client().send(new TdApi.CloseChat(chatId), okHandler());',
                '// client().send(new TdApi.CloseChat(chatId), okHandler());')
           ])
-          print("Done patching.")
+          print("All patches applied cleanly.")
           EOF
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Debug APK
         run: |
