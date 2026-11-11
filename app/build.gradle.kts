@@ -1264,7 +1264,7 @@ dependencies {
 }
 
 if (!config.isExperimentalBuild) {
-  if (customGoogleServices == null) {
+  if (customGoogleServices == null && hasFirebaseMessaging) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
   }
   if (config.isHuaweiBuild) {
