@@ -10,6 +10,10 @@ on:
         required: true
         default: 'arm64'
 
+# Даем права боту сохранить сгенерированный ключ в репозиторий
+permissions:
+  contents: write
+
 env:
   TERM: xterm
   RUSTUP_HOME: /home/runner/.rustup
@@ -17,7 +21,7 @@ env:
 
 jobs:
   build:
-    name: Build APK (${{ github.event.inputs.abi || 'arm64' }})
+    name: Build Release APK (${{ github.event.inputs.abi || 'arm64' }})
     runs-on: ubuntu-24.04
 
     steps:
@@ -26,7 +30,7 @@ jobs:
         with:
           submodules: recursive
           lfs: true
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Expand Swap Space (Prevent OOM)
         run: |
@@ -38,10 +42,25 @@ jobs:
           free -h
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '25'
+
+      # Если ключа нет в репозитории — GitHub Actions создаст его и сам запушит в репо!
+      - name: Ensure Persistent Keystore
+        run: |
+          if [ ! -f "release.jks" ]; then
+            echo "Key not found. Generating persistent keystore in CI..."
+            keytool -genkeypair -v -keystore release.jks -alias tgx -keyalg RSA -keysize 2048 -validity 10000 -storepass telegramx -keypass telegramx -dname "CN=TelegramX, O=Telegram, C=US"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add release.jks
+            git commit -m "Add persistent release keystore [skip ci]" || true
+            git push || true
+          else
+            echo "Persistent keystore already exists."
+          fi
 
       - name: Setup Exact Rust Toolchain & Targets
         run: |
@@ -62,9 +81,12 @@ jobs:
 
           echo "$CARGO_HOME/bin" >> $GITHUB_PATH
 
+          # Задаем кастомное имя пакета (не конфликтует с оригиналом)
           cat <<EOF > local.properties
           sdk.dir=$ANDROID_HOME
           rust.dir=$RUSTUP_HOME
+          app.id=org.thunderdog.challegram.custom
+          app.name=Telegram X
           telegram.api_id=21724
           telegram.api_hash=3e0cb5efcd52300aec5994fdfc5bdc16
           EOF
@@ -78,15 +100,21 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
+      - name: Build Optimized Release APK
         run: |
           ABI="${{ github.event.inputs.abi || 'arm64' }}"
           chmod +x gradlew
-          ./gradlew :app:assembleLatestDebug -Pabi=$ABI --stacktrace
+          ./gradlew :app:assembleLatestRelease -Pabi=$ABI --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Sign Release APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk -name "*latest*.apk" | head -n 1)
+          echo "Found APK at $APK_PATH"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner sign --ks release.jks --ks-key-alias tgx --ks-pass pass:telegramx --key-pass pass:telegramx --out app/build/outputs/apk/Telegram-X-Release.apk "$APK_PATH"
+
+      - name: Upload Optimized Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-X-${{ github.event.inputs.abi || 'arm64' }}
-          path: app/build/outputs/apk/**/*.apk
+          name: Telegram-X-Release
+          path: app/build/outputs/apk/Telegram-X-Release.apk
           retention-days: 14
