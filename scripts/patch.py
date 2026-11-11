@@ -2,7 +2,7 @@ import os
 
 def patch(file_path, old_str, new_str):
     if not os.path.exists(file_path):
-        print(f"[!] Error: File not found: {file_path}")
+        print(f"[!] File not found: {file_path}")
         return
         
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -18,7 +18,7 @@ def patch(file_path, old_str, new_str):
     print(f"[+] Successfully patched: {file_path}")
 
 # ==============================================================================
-# 1. MessagesLoader.java — Блокировка рекламы в каналах
+# 1. MessagesLoader.java — Полная блокировка рекламы в каналах
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java',
@@ -27,7 +27,7 @@ patch(
 )
 
 # ==============================================================================
-# 2. TGMessage.java — Разрешение сохранения/копирования из закрытых каналов
+# 2. TGMessage.java — Разрешение сохранения, копирования и пересылки всего отовсюду
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/data/TGMessage.java',
@@ -50,7 +50,7 @@ patch(
 )
 
 # ==============================================================================
-# 4. Tdlib.java — Клиентский Premium
+# 4. Tdlib.java — Клиентский Premium (иконки, темы, автопереводчик)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -91,7 +91,7 @@ patch(
 )
 
 # ==============================================================================
-# 8. Tdlib.java — Маскировка: подмена отпечатка SHA-1 на оригинальный ключ разработчика
+# 8. Tdlib.java — Маскировка: официальный отпечаток ключа Вячеслава Крылова
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -100,7 +100,7 @@ patch(
 )
 
 # ==============================================================================
-# 9. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов Telegram
+# 9. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -109,7 +109,7 @@ patch(
 )
 
 # ==============================================================================
-# 10. Tdlib.java — Отмена сетевой телеметрии просмотра каналов (OpenChat / CloseChat)
+# 10. Tdlib.java — Отмена сетевой телеметрии OpenChat и CloseChat
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -134,6 +134,29 @@ patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'parameters.systemVersion = TdlibManager.getSystemVersion();',
     'parameters.systemVersion = "Android 14";'
+)
+
+# ==============================================================================
+# 12. Tdlib.java — Анонимный просмотр историй (Stories) без попадания в список зрителей
+# ==============================================================================
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'new TdApi.OpenStory(',
+    'new TdApi.SetAlarm(0); // new TdApi.OpenStory('
+)
+
+# ==============================================================================
+# 13. SharedChatsController.java — Блокировка трекинга перехода по рекомендациям каналов
+# ==============================================================================
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/SharedChatsController.java',
+    'tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), chatId), tdlib.typedOkHandler());',
+    '// tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), chatId), tdlib.typedOkHandler());'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/SharedChatsController.java',
+    'tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());',
+    '// tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());'
 )
 
 print("[*] All patches applied successfully!")
