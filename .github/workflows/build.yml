@@ -107,10 +107,59 @@ jobs:
           ./gradlew :app:assembleLatestRelease -Pabi=$ABI --stacktrace
 
       - name: Sign Release APK
+        shell: bash
         run: |
-          APK_PATH=$(find app/build/outputs/apk -name "*latest*.apk" | head -n 1)
-          echo "Found APK at $APK_PATH"
-          $ANDROID_HOME/build-tools/35.0.0/apksigner sign --ks release.jks --ks-key-alias tgx --ks-pass pass:telegramx --key-pass pass:telegramx --out app/build/outputs/apk/Telegram-X-Release.apk "$APK_PATH"
+          set -euo pipefail
+
+          APK_DIR="app/build/outputs/apk"
+          SIGNED_APK="$APK_DIR/Telegram-X-Release.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+
+          echo "Searching for APK files..."
+
+          if [[ ! -d "$APK_DIR" ]]; then
+            echo "::error::APK output directory not found: $APK_DIR"
+            find app/build/outputs -type f -print || true
+            exit 1
+          fi
+
+          mapfile -t APK_FILES < <(
+            find "$APK_DIR" -type f -name "*.apk" \
+              ! -path "$SIGNED_APK" | sort
+          )
+
+          if [[ ${#APK_FILES[@]} -eq 0 ]]; then
+            echo "::error::No APK files found!"
+            echo "All build outputs:"
+            find app/build/outputs -type f -print || true
+            exit 1
+          fi
+
+          if [[ ${#APK_FILES[@]} -gt 1 ]]; then
+            echo "::error::Multiple APK files found. Refusing to sign an arbitrary one:"
+            printf '%s\n' "${APK_FILES[@]}"
+            exit 1
+          fi
+
+          APK_PATH="${APK_FILES[0]}"
+
+          echo "Found APK: $APK_PATH"
+          echo "Signing APK..."
+
+          "$APKSIGNER" sign \
+            --ks release.jks \
+            --ks-key-alias tgx \
+            --ks-pass pass:telegramx \
+            --key-pass pass:telegramx \
+            --out "$SIGNED_APK" \
+            "$APK_PATH"
+
+          echo "Verifying signature..."
+
+          "$APKSIGNER" verify --verbose "$SIGNED_APK"
+
+          echo "Signed APK: $SIGNED_APK"
+          ls -lh "$SIGNED_APK"
 
       - name: Upload Optimized Release APK
         uses: actions/upload-artifact@v4
