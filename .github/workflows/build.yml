@@ -66,7 +66,7 @@ jobs:
           sdk.dir=$ANDROID_HOME
           rust.dir=$RUSTUP_HOME
           telegram.api_id=21724
-          telegram.api_hash=3e0cb5efcd52300aec5913f0008670bc
+          telegram.api_hash=3e0cb5efcd52300aec5994fdfc5bdc16
           EOF
 
       - name: Validate Git Setup
