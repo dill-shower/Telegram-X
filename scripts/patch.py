@@ -1,4 +1,5 @@
 import os
+import re
 
 def patch(file_path, old_str, new_str):
     if not os.path.exists(file_path):
@@ -18,16 +19,41 @@ def patch(file_path, old_str, new_str):
     print(f"[+] Successfully patched: {file_path}")
 
 # ==============================================================================
-# 1. MessagesLoader.java — Полная блокировка рекламы в каналах
+# 1. MessagesLoader.java — Блокировка рекламы + Режим призрака (источник Preview)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java',
     'private boolean canShowSponsoredMessage (long chatId) {',
     'private boolean canShowSponsoredMessage (long chatId) {\n    if (true) return false;'
 )
+patch(
+    'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesLoader.java',
+    'private TdApi.MessageSource newMessageSource () {',
+    'private TdApi.MessageSource newMessageSource () {\n    if (true) return new TdApi.MessageSourceHistoryPreview();'
+)
 
 # ==============================================================================
-# 2. TGMessage.java — Разрешение сохранения, копирования и пересылки всего отовсюду
+# 2. MessagesManager.java — Режим призрака (не помечать сообщения прочитанными)
+# ==============================================================================
+mm_path = 'app/src/main/java/org/thunderdog/challegram/component/chat/MessagesManager.java'
+if os.path.exists(mm_path):
+    with open(mm_path, 'r', encoding='utf-8') as f:
+        mm_code = f.read()
+    mm_new, count = re.subn(
+        r'((?:public|private|protected)?\s*boolean\s+readMessagesDisabled\s*\(\s*\)\s*\{)',
+        r'\1\n    if (true) return true;',
+        mm_code,
+        count=1
+    )
+    if count > 0:
+        with open(mm_path, 'w', encoding='utf-8') as f:
+            f.write(mm_new)
+        print(f"[+] Successfully patched readMessagesDisabled in {mm_path}")
+    else:
+        print(f"[!] Warning: readMessagesDisabled not found in {mm_path}")
+
+# ==============================================================================
+# 3. TGMessage.java — Разрешение сохранения, копирования и пересылки всего отовсюду
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/data/TGMessage.java',
@@ -36,7 +62,7 @@ patch(
 )
 
 # ==============================================================================
-# 3. MessagesController.java — Скриншоты везде + отключение статуса "Печатает..."
+# 4. MessagesController.java — Скриншоты везде + отключение статуса "Печатает..."
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
@@ -50,7 +76,7 @@ patch(
 )
 
 # ==============================================================================
-# 4. Tdlib.java — Клиентский Premium (иконки, темы, автопереводчик)
+# 5. Tdlib.java — Клиентский Premium (иконки, темы, автопереводчик)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -59,7 +85,7 @@ patch(
 )
 
 # ==============================================================================
-# 5. Tdlib.java — Снятие ограничений NSFW / Sensitive контента
+# 6. Tdlib.java — Снятие ограничений NSFW / Sensitive контента
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -68,7 +94,7 @@ patch(
 )
 
 # ==============================================================================
-# 6. Tdlib.java — Снятие региональных блокировок каналов (Google Play цензура)
+# 7. Tdlib.java — Снятие региональных блокировок каналов (Google Play цензура)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -77,7 +103,7 @@ patch(
 )
 
 # ==============================================================================
-# 7. Tdlib.java — Заглушки Google Play Integrity и ReCaptcha
+# 8. Tdlib.java — Заглушки Google Play Integrity и ReCaptcha
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -91,7 +117,7 @@ patch(
 )
 
 # ==============================================================================
-# 8. Tdlib.java — Маскировка: официальный отпечаток ключа Вячеслава Крылова
+# 9. Tdlib.java — Маскировка: официальный отпечаток ключа Вячеслава Крылова
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -100,7 +126,7 @@ patch(
 )
 
 # ==============================================================================
-# 9. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов
+# 10. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -109,7 +135,7 @@ patch(
 )
 
 # ==============================================================================
-# 10. Tdlib.java — Отмена сетевой телеметрии OpenChat и CloseChat
+# 11. Tdlib.java — Отмена сетевой телеметрии OpenChat и CloseChat
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -123,7 +149,7 @@ patch(
 )
 
 # ==============================================================================
-# 11. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
+# 12. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -137,16 +163,40 @@ patch(
 )
 
 # ==============================================================================
-# 12. Tdlib.java — Анонимный просмотр историй (Stories) без попадания в список зрителей
+# 13. Tdlib.java — Анонимный просмотр историй (Stories) + блокировка уведомлений о скриншотах
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'new TdApi.OpenStory(',
     'new TdApi.SetAlarm(0); // new TdApi.OpenStory('
 )
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'public void sendScreenshotMessage (long chatId, long[] messageIds) {',
+    'public void sendScreenshotMessage (long chatId, long[] messageIds) {\n    if (true) return;'
+)
 
 # ==============================================================================
-# 13. SharedChatsController.java — Блокировка трекинга перехода по рекомендациям каналов
+# 14. Tdlib.java — Вечный оффлайн (отключаем отправку статуса "В сети")
+# ==============================================================================
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'client.send(new TdApi.SetOption("use_pfs", new TdApi.OptionValueBoolean(true)), okHandler);',
+    'client.send(new TdApi.SetOption("use_pfs", new TdApi.OptionValueBoolean(true)), okHandler);\n    client.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(false)), okHandler);'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'client.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(true)), tdlib.okHandler());',
+    'client.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(false)), tdlib.okHandler());'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'public void setOnline (boolean isOnline) {',
+    'public void setOnline (boolean isOnline) {\n    isOnline = false;'
+)
+
+# ==============================================================================
+# 15. SharedChatsController.java — Блокировка трекинга рекомендаций каналов
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/SharedChatsController.java',
