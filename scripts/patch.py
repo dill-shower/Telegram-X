@@ -205,6 +205,35 @@ patch(
 )
 
 # ==============================================================================
+# 16. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9) под Tensor G3 (Pixel 8 Pro)
+# ==============================================================================
+cmake_path = 'app/jni/CMakeLists.txt'
+if os.path.exists(cmake_path):
+    with open(cmake_path, 'r', encoding='utf-8') as f:
+        cmake_code = f.read()
+
+    tensor_flags = """
+add_compile_options(
+  $<$<COMPILE_LANGUAGE:C,CXX>:-O3>
+  $<$<COMPILE_LANGUAGE:C,CXX>:-march=armv9-a+bf16+i8mm+crypto>
+  $<$<COMPILE_LANGUAGE:C,CXX>:-mtune=cortex-a715>
+)
+"""
+    cmake_new, count = re.subn(
+        r'(cmake_minimum_required\s*\([^\)]*\))',
+        r'\1\n' + tensor_flags,
+        cmake_code,
+        count=1,
+        flags=re.IGNORECASE
+    )
+    if count > 0:
+        with open(cmake_path, 'w', encoding='utf-8') as f:
+            f.write(cmake_new)
+        print(f"[+] Successfully injected Tensor G3 (ARMv9 -O3) flags into {cmake_path}")
+    else:
+        print(f"[!] Warning: cmake_minimum_required not found in {cmake_path}")
+
+# ==============================================================================
 # Диагностика: ищем где именно вызывается OpenStory (просто выводим в лог)
 # ==============================================================================
 for root, _, files in os.walk('app/src/main'):
