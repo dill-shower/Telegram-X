@@ -163,13 +163,8 @@ patch(
 )
 
 # ==============================================================================
-# 13. Tdlib.java — Анонимный просмотр историй (Stories) + блокировка уведомлений о скриншотах
+# 13. Tdlib.java — Блокировка уведомлений о скриншотах
 # ==============================================================================
-patch(
-    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
-    'new TdApi.OpenStory(',
-    'new TdApi.SetAlarm(0); // new TdApi.OpenStory('
-)
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void sendScreenshotMessage (long chatId, long[] messageIds) {',
@@ -177,7 +172,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. Tdlib.java — Вечный оффлайн (отключаем отправку статуса "В сети")
+# 14. Tdlib.java — Вечный оффлайн (без ошибки лямбды)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -192,7 +187,7 @@ patch(
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void setOnline (boolean isOnline) {',
-    'public void setOnline (boolean isOnline) {\n    isOnline = false;'
+    'public void setOnline (boolean isOnline) {\n    if (true) return;'
 )
 
 # ==============================================================================
@@ -208,5 +203,17 @@ patch(
     'tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());',
     '// tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());'
 )
+
+# ==============================================================================
+# Диагностика: ищем где именно вызывается OpenStory (просто выводим в лог)
+# ==============================================================================
+for root, _, files in os.walk('app/src/main'):
+    for file in files:
+        if file.endswith(('.java', '.kt')):
+            fp = os.path.join(root, file)
+            with open(fp, 'r', encoding='utf-8') as f:
+                for idx, line in enumerate(f, 1):
+                    if 'OpenStory' in line:
+                        print(f"[i] Found OpenStory at {fp}:{idx}: {line.strip()}")
 
 print("[*] All patches applied successfully!")
