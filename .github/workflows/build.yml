@@ -18,6 +18,8 @@ env:
   TERM: xterm
   RUSTUP_HOME: /home/runner/.rustup
   CARGO_HOME: /home/runner/.cargo
+  # Оптимизация Rust (tlottie) строго под ядра Tensor G3 (Pixel 8 Pro)
+  CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: "-C target-cpu=cortex-a715 -C opt-level=3"
 
 jobs:
   build:
@@ -91,14 +93,15 @@ jobs:
           telegram.api_hash=3e0cb5efcd52300aec5994fdfc5bdc16
           EOF
 
+      # ВАЖНО: setup-gradle стоит ДО первого вызова ./gradlew, чтобы кэш работал
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Validate Git Setup
         run: ./gradlew :app:validateGitSetup
 
       - name: Apply Patches
         run: python3 scripts/patch.py
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Optimized Release APK
         run: |
