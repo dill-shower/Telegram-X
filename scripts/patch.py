@@ -19,6 +19,64 @@ def patch(file_path, old_str, new_str):
     print(f"[+] Successfully patched: {file_path}")
 
 # ==============================================================================
+# 0. Client.java (Шлюз TDLib) — Глобальный перехватчик всех нежелательных запросов
+# ==============================================================================
+client_path = 'tdlib/src/main/java/org/drinkless/tdlib/Client.java'
+tdapi_path = None
+for root, _, files in os.walk('tdlib'):
+    if 'TdApi.java' in files:
+        tdapi_path = os.path.join(root, 'TdApi.java')
+        break
+
+candidates = [
+    'OpenStory',
+    'CloseStory',
+    'OpenChat',
+    'CloseChat',
+    'OpenChatSimilarChat',
+    'OpenBotSimilarBot',
+    'SendChatAction',
+    'SendChatScreenshotTakenNotification',
+    'ViewSponsoredMessage',
+    'ClickSponsoredMessage',
+    'OpenChatSponsoredMessage',
+]
+
+verified_classes = []
+if tdapi_path and os.path.exists(tdapi_path):
+    with open(tdapi_path, 'r', encoding='utf-8') as f:
+        tdapi_code = f.read()
+    for cls in candidates:
+        if f'class {cls} extends Function<Ok>' in tdapi_code:
+            verified_classes.append(cls)
+        else:
+            print(f"[i] Skipped TdApi.{cls} (not found as Function<Ok> in TdApi.java)")
+else:
+    # Безопасный фолбэк, если TdApi.java не найден
+    verified_classes = ['OpenChat', 'CloseChat', 'OpenChatSimilarChat', 'OpenBotSimilarBot', 'SendChatAction']
+
+if verified_classes and os.path.exists(client_path):
+    checks = [f'query instanceof TdApi.{cls}' for cls in verified_classes]
+    # Дополнительно блокируем любые отчёты о скриншотах через ViewMessages
+    checks.append('(query instanceof TdApi.ViewMessages && ((TdApi.ViewMessages) query).source instanceof TdApi.MessageSourceScreenshot)')
+    condition_str = '\n            || '.join(checks)
+    
+    gateway_code = (
+        'public void send(TdApi.Function<?> query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {\n'
+        '        if (\n'
+        f'            {condition_str}\n'
+        '        ) {\n'
+        '            query = new TdApi.SetAlarm(0);\n'
+        '        }'
+    )
+    patch(
+        client_path,
+        'public void send(TdApi.Function<?> query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {',
+        gateway_code
+    )
+    print(f"[+] Client.java gateway blocking: {', '.join(verified_classes)}")
+
+# ==============================================================================
 # 1. MessagesLoader.java — Блокировка рекламы + Режим призрака (источник Preview)
 # ==============================================================================
 patch(
@@ -135,21 +193,7 @@ patch(
 )
 
 # ==============================================================================
-# 11. Tdlib.java — Отмена сетевой телеметрии OpenChat и CloseChat
-# ==============================================================================
-patch(
-    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
-    'new TdApi.OpenChat(chatId)',
-    'new TdApi.SetAlarm(0)'
-)
-patch(
-    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
-    'new TdApi.CloseChat(chatId)',
-    'new TdApi.SetAlarm(0)'
-)
-
-# ==============================================================================
-# 12. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
+# 11. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -163,7 +207,7 @@ patch(
 )
 
 # ==============================================================================
-# 13. Tdlib.java — Блокировка уведомлений о скриншотах
+# 12. Tdlib.java — Блокировка уведомлений о скриншотах
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -172,7 +216,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. Tdlib.java — Вечный оффлайн + мгновенный сброс онлайна после чтения/отправки
+# 13. Tdlib.java — Вечный оффлайн + мгновенный сброс онлайна после чтения/отправки
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -213,21 +257,7 @@ patch(
 )
 
 # ==============================================================================
-# 15. SharedChatsController.java — Блокировка трекинга рекомендаций каналов
-# ==============================================================================
-patch(
-    'app/src/main/java/org/thunderdog/challegram/ui/SharedChatsController.java',
-    'tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), chatId), tdlib.typedOkHandler());',
-    '// tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), chatId), tdlib.typedOkHandler());'
-)
-patch(
-    'app/src/main/java/org/thunderdog/challegram/ui/SharedChatsController.java',
-    'tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());',
-    '// tdlib.send(new TdApi.OpenChatSimilarChat(getChatId(), openedChatId), tdlib.typedOkHandler());'
-)
-
-# ==============================================================================
-# 16. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9 + ThinLTO) под Tensor G3
+# 14. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9 + ThinLTO) под Tensor G3
 # ==============================================================================
 cmake_path = 'app/jni/CMakeLists.txt'
 if os.path.exists(cmake_path):
@@ -256,17 +286,5 @@ add_link_options(-flto=thin -Wl,--thinlto-jobs=4 -Wl,-O3)
         print(f"[+] Successfully injected Tensor G3 (ARMv9 -O3 ThinLTO) flags into {cmake_path}")
     else:
         print(f"[!] Warning: cmake_minimum_required not found in {cmake_path}")
-
-# ==============================================================================
-# Диагностика: ищем где именно вызывается OpenStory (просто выводим в лог)
-# ==============================================================================
-for root, _, files in os.walk('app/src/main'):
-    for file in files:
-        if file.endswith(('.java', '.kt')):
-            fp = os.path.join(root, file)
-            with open(fp, 'r', encoding='utf-8') as f:
-                for idx, line in enumerate(f, 1):
-                    if 'OpenStory' in line:
-                        print(f"[i] Found OpenStory at {fp}:{idx}: {line.strip()}")
 
 print("[*] All patches applied successfully!")
