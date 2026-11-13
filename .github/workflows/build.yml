@@ -18,8 +18,10 @@ env:
   TERM: xterm
   RUSTUP_HOME: /home/runner/.rustup
   CARGO_HOME: /home/runner/.cargo
-  # Оптимизация Rust (tlottie) строго под ядра Tensor G3 (Pixel 8 Pro)
+  # Оптимизация Rust (tlottie) строго под Tensor G3 с полным LTO
   CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: "-C target-cpu=cortex-a715 -C opt-level=3"
+  CARGO_PROFILE_RELEASE_LTO: "fat"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
 
 jobs:
   build:
@@ -34,13 +36,19 @@ jobs:
           lfs: true
           fetch-depth: 0
 
-      - name: Expand Swap Space (Prevent OOM)
+      - name: Free Disk Space & Expand Swap (16G)
         run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/share/swift /usr/local/lib/node_modules
+          sudo docker system prune -af || true
+          sudo systemctl stop docker || true
+          sudo rm -rf /var/lib/docker
+
           sudo swapoff -a
-          sudo fallocate -l 8G /swapfile
+          sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+          df -h
           free -h
 
       - name: Set up JDK 25
@@ -49,7 +57,7 @@ jobs:
           distribution: 'zulu'
           java-version: '25'
 
-      # Если ключа нет в репозитории — GitHub Actions создаст его и сам запушит в репо!
+      # Если ключа нет в репозитории — GitHub Actions создаст его и сам запушит в репо
       - name: Ensure Persistent Keystore
         run: |
           if [ ! -f "release.jks" ]; then
@@ -93,7 +101,7 @@ jobs:
           telegram.api_hash=3e0cb5efcd52300aec5994fdfc5bdc16
           EOF
 
-      # ВАЖНО: setup-gradle стоит ДО первого вызова ./gradlew, чтобы кэш работал
+      # Строго ДО первого вызова ./gradlew, чтобы работал кэш
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
