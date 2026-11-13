@@ -172,7 +172,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. Tdlib.java — Вечный оффлайн (без ошибки лямбды)
+# 14. Tdlib.java — Вечный оффлайн + мгновенный сброс онлайна после чтения/отправки
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -187,7 +187,29 @@ patch(
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void setOnline (boolean isOnline) {',
-    'public void setOnline (boolean isOnline) {\n    if (true) return;'
+    """public void forceOffline () {
+    performOptional(c -> c.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(true)), r ->
+      c.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(false)), silentHandler())
+    ), null);
+  }
+
+  public void setOnline (boolean isOnline) {
+    if (true) return;"""
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'client().send(new TdApi.ViewMessages(chatId, new long[] {chat.lastMessage.id}, source, true), okHandler(after));',
+    'client().send(new TdApi.ViewMessages(chatId, new long[] {chat.lastMessage.id}, source, true), result -> { okHandler(after).onResult(result); forceOffline(); });'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'send(new TdApi.ViewMessages(chatId, messageIds, source, true), typedOkHandler());',
+    'send(new TdApi.ViewMessages(chatId, messageIds, source, true), (ok, error) -> { typedOkHandler().onResult(ok, error); forceOffline(); });'
+)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {',
+    'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {\n    forceOffline();'
 )
 
 # ==============================================================================
@@ -205,7 +227,7 @@ patch(
 )
 
 # ==============================================================================
-# 16. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9) под Tensor G3 (Pixel 8 Pro)
+# 16. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9 + ThinLTO) под Tensor G3
 # ==============================================================================
 cmake_path = 'app/jni/CMakeLists.txt'
 if os.path.exists(cmake_path):
@@ -217,7 +239,9 @@ add_compile_options(
   $<$<COMPILE_LANGUAGE:C,CXX>:-O3>
   $<$<COMPILE_LANGUAGE:C,CXX>:-march=armv9-a+bf16+i8mm+crypto>
   $<$<COMPILE_LANGUAGE:C,CXX>:-mtune=cortex-a715>
+  $<$<COMPILE_LANGUAGE:C,CXX>:-flto=thin>
 )
+add_link_options(-flto=thin -Wl,--thinlto-jobs=4 -Wl,-O3)
 """
     cmake_new, count = re.subn(
         r'(cmake_minimum_required\s*\([^\)]*\))',
@@ -229,7 +253,7 @@ add_compile_options(
     if count > 0:
         with open(cmake_path, 'w', encoding='utf-8') as f:
             f.write(cmake_new)
-        print(f"[+] Successfully injected Tensor G3 (ARMv9 -O3) flags into {cmake_path}")
+        print(f"[+] Successfully injected Tensor G3 (ARMv9 -O3 ThinLTO) flags into {cmake_path}")
     else:
         print(f"[!] Warning: cmake_minimum_required not found in {cmake_path}")
 
