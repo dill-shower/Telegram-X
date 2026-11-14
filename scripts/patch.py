@@ -43,6 +43,7 @@ candidates = [
 ]
 
 verified_classes = []
+has_send_album = False
 if tdapi_path and os.path.exists(tdapi_path):
     with open(tdapi_path, 'r', encoding='utf-8') as f:
         tdapi_code = f.read()
@@ -51,6 +52,7 @@ if tdapi_path and os.path.exists(tdapi_path):
             verified_classes.append(cls)
         else:
             print(f"[i] Skipped TdApi.{cls} (not found as Function<Ok> in TdApi.java)")
+    has_send_album = 'class SendMessageAlbum ' in tdapi_code
 else:
     verified_classes = ['OpenChat', 'CloseChat', 'OpenChatSimilarChat', 'OpenBotSimilarBot', 'SendChatAction']
 
@@ -131,7 +133,6 @@ patch(
     'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;'
 )
 
-# Авто-отложка при обычном нажатии "Отправить" (текст и файлы, включая ботов)
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
     '  private void send (TdApi.MessageSendOptions sendOptions) {\n    send(sendOptions, true);\n  }',
@@ -146,7 +147,6 @@ patch(
   }"""
 )
 
-# Авто-отложка для стикеров, гифок, опросов и "без звука"
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
     '    } else {\n      sendCallback.onSendRequested(initialSendOptions, false);\n    }',
@@ -160,7 +160,6 @@ patch(
     }"""
 )
 
-# Авто-отложка для фото и видео из галереи
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
     '    TdApi.MessageSendOptions finalSendOptions = Td.newSendOptions(\n      modifiedSendOptions,\n      getInputSuggestedPostInfo(replyInfo),\n      obtainSilentMode()\n    );',
@@ -184,7 +183,74 @@ patch(
 )
 
 # ==============================================================================
-# 5. Tdlib.java — Клиентский Premium (иконки, темы, автопереводчик)
+# 5. Tdlib.java — Глобальный Interceptor: авто-отложка для пересылки, войсов и всего остального
+# ==============================================================================
+album_branch = ""
+if has_send_album:
+    album_branch = """ else if (query instanceof TdApi.SendMessageAlbum) {
+          TdApi.SendMessageAlbum sa = (TdApi.SendMessageAlbum) query;
+          if (!ChatId.isSecret(sa.chatId) && !tdlib.isSelfChat(sa.chatId)) {
+            if (sa.options == null) {
+              sa.options = new TdApi.MessageSendOptions();
+            }
+            if (sa.options.schedulingState == null) {
+              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+              sa.options.schedulingState = state;
+            }
+          }
+        }"""
+
+interceptor_code = f"""      tdlib.context.modifyClient(tdlib, client);
+      this.client.setInterceptor(query -> {{
+        if (query instanceof TdApi.SendMessage) {{
+          TdApi.SendMessage sm = (TdApi.SendMessage) query;
+          if (!ChatId.isSecret(sm.chatId) && !tdlib.isSelfChat(sm.chatId)) {{
+            if (sm.options == null) {{
+              sm.options = new TdApi.MessageSendOptions();
+            }}
+            if (sm.options.schedulingState == null) {{
+              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+              sm.options.schedulingState = state;
+            }}
+          }}
+        }} else if (query instanceof TdApi.ForwardMessages) {{
+          TdApi.ForwardMessages fm = (TdApi.ForwardMessages) query;
+          if (!ChatId.isSecret(fm.chatId) && !tdlib.isSelfChat(fm.chatId)) {{
+            if (fm.options == null) {{
+              fm.options = new TdApi.MessageSendOptions();
+            }}
+            if (fm.options.schedulingState == null) {{
+              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+              fm.options.schedulingState = state;
+            }}
+          }}
+        }} else if (query instanceof TdApi.SendInlineQueryResultMessage) {{
+          TdApi.SendInlineQueryResultMessage iq = (TdApi.SendInlineQueryResultMessage) query;
+          if (!ChatId.isSecret(iq.chatId) && !tdlib.isSelfChat(iq.chatId)) {{
+            if (iq.options == null) {{
+              iq.options = new TdApi.MessageSendOptions();
+            }}
+            if (iq.options.schedulingState == null) {{
+              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+              iq.options.schedulingState = state;
+            }}
+          }}
+        }}{album_branch}
+        return null;
+      }});"""
+
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    '      tdlib.context.modifyClient(tdlib, client);',
+    interceptor_code
+)
+
+# ==============================================================================
+# 6. Tdlib.java — Клиентский Premium (иконки, темы, автопереводчик)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -193,7 +259,7 @@ patch(
 )
 
 # ==============================================================================
-# 6. Tdlib.java — Снятие ограничений NSFW / Sensitive контента
+# 7. Tdlib.java — Снятие ограничений NSFW / Sensitive контента
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -202,7 +268,7 @@ patch(
 )
 
 # ==============================================================================
-# 7. Tdlib.java — Снятие региональных блокировок каналов (Google Play цензура)
+# 8. Tdlib.java — Снятие региональных блокировок каналов (Google Play цензура)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -211,7 +277,7 @@ patch(
 )
 
 # ==============================================================================
-# 8. Tdlib.java — Заглушки Google Play Integrity и ReCaptcha
+# 9. Tdlib.java — Заглушки Google Play Integrity и ReCaptcha
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -225,7 +291,7 @@ patch(
 )
 
 # ==============================================================================
-# 9. Tdlib.java — Маскировка: официальный отпечаток ключа Вячеслава Крылова
+# 10. Tdlib.java — Маскировка: официальный отпечаток ключа Вячеслава Крылова
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -234,7 +300,7 @@ patch(
 )
 
 # ==============================================================================
-# 10. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов
+# 11. Tdlib.java — Фиксация оригинального имени пакета в отчётах для серверов
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -243,7 +309,7 @@ patch(
 )
 
 # ==============================================================================
-# 11. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
+# 12. Tdlib.java — Маскировка модели устройства под массовый Samsung Galaxy A55
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -257,7 +323,7 @@ patch(
 )
 
 # ==============================================================================
-# 12. Tdlib.java — Блокировка уведомлений о скриншотах + Анти-удаление на лету
+# 13. Tdlib.java — Блокировка уведомлений о скриншотах + Анти-удаление на лету
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -271,7 +337,7 @@ patch(
 )
 
 # ==============================================================================
-# 13. Tdlib.java — Вечный оффлайн + сброс онлайна (кроме отложенных и Избранного!)
+# 14. Tdlib.java — Вечный оффлайн + сброс онлайна (кроме отложенных и Избранного!)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -312,7 +378,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9 + ThinLTO) под Tensor G3
+# 15. CMakeLists.txt — Максимальная оптимизация (-O3 + ARMv9 + ThinLTO) под Tensor G3
 # ==============================================================================
 cmake_path = 'app/jni/CMakeLists.txt'
 if os.path.exists(cmake_path):
