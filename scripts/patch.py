@@ -52,12 +52,10 @@ if tdapi_path and os.path.exists(tdapi_path):
         else:
             print(f"[i] Skipped TdApi.{cls} (not found as Function<Ok> in TdApi.java)")
 else:
-    # Безопасный фолбэк, если TdApi.java не найден
     verified_classes = ['OpenChat', 'CloseChat', 'OpenChatSimilarChat', 'OpenBotSimilarBot', 'SendChatAction']
 
 if verified_classes and os.path.exists(client_path):
     checks = [f'query instanceof TdApi.{cls}' for cls in verified_classes]
-    # Дополнительно блокируем любые отчёты о скриншотах через ViewMessages
     checks.append('(query instanceof TdApi.ViewMessages && ((TdApi.ViewMessages) query).source instanceof TdApi.MessageSourceScreenshot)')
     condition_str = '\n            || '.join(checks)
     
@@ -207,16 +205,21 @@ patch(
 )
 
 # ==============================================================================
-# 12. Tdlib.java — Блокировка уведомлений о скриншотах
+# 12. Tdlib.java — Блокировка уведомлений о скриншотах + Анти-удаление на лету
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void sendScreenshotMessage (long chatId, long[] messageIds) {',
     'public void sendScreenshotMessage (long chatId, long[] messageIds) {\n    if (true) return;'
 )
+patch(
+    'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
+    'private void updateMessagesDeleted (TdApi.UpdateDeleteMessages update) {',
+    'private void updateMessagesDeleted (TdApi.UpdateDeleteMessages update) {\n    if (true) return;'
+)
 
 # ==============================================================================
-# 13. Tdlib.java — Вечный оффлайн + мгновенный сброс онлайна после чтения/отправки
+# 13. Tdlib.java — Вечный оффлайн + сброс онлайна (кроме отложенных и Избранного!)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -253,7 +256,7 @@ patch(
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {',
-    'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {\n    forceOffline();'
+    'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {\n    if (update.message.schedulingState == null && !isSelfChat(update.message.chatId)) {\n      forceOffline();\n    }'
 )
 
 # ==============================================================================
