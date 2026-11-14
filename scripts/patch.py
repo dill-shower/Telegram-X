@@ -118,7 +118,7 @@ patch(
 )
 
 # ==============================================================================
-# 4. MessagesController.java — Скриншоты везде + отключение статуса "Печатает..."
+# 4. MessagesController.java — Скриншоты, отмена "печатает", авто-отложка на +20 сек
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
@@ -129,6 +129,58 @@ patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
     'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {',
     'public void setChatAction (@TdApi.ChatAction.Constructors int action, boolean set, boolean force) {\n    if (true) return;'
+)
+
+# Авто-отложка при обычном нажатии "Отправить" (текст и файлы, включая ботов)
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
+    '  private void send (TdApi.MessageSendOptions sendOptions) {\n    send(sendOptions, true);\n  }',
+    """  private void send (TdApi.MessageSendOptions sendOptions) {
+    if (sendOptions == null && chat != null && !isSecretChat() && !isSelfChat()) {
+      TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+      state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+      sendOptions = new TdApi.MessageSendOptions();
+      sendOptions.schedulingState = state;
+    }
+    send(sendOptions, true);
+  }"""
+)
+
+# Авто-отложка для стикеров, гифок, опросов и "без звука"
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
+    '    } else {\n      sendCallback.onSendRequested(initialSendOptions, false);\n    }',
+    """    } else {
+      if (initialSendOptions.schedulingState == null && chat != null && !isSecretChat() && !isSelfChat()) {
+        TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+        state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+        initialSendOptions.schedulingState = state;
+      }
+      sendCallback.onSendRequested(initialSendOptions, false);
+    }"""
+)
+
+# Авто-отложка для фото и видео из галереи
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
+    '    TdApi.MessageSendOptions finalSendOptions = Td.newSendOptions(\n      modifiedSendOptions,\n      getInputSuggestedPostInfo(replyInfo),\n      obtainSilentMode()\n    );',
+    """    TdApi.MessageSendOptions finalSendOptions = Td.newSendOptions(
+      modifiedSendOptions,
+      getInputSuggestedPostInfo(replyInfo),
+      obtainSilentMode()
+    );
+    if (finalSendOptions.schedulingState == null && chat != null && !isSecretChat() && !isSelfChat()) {
+      TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+      state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
+      finalSendOptions.schedulingState = state;
+    }"""
+)
+
+# Не перекидываем на экран "Отложенные сообщения" после нажатия Отправить
+patch(
+    'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
+    '              if (!areScheduled && isSchedule && isFocused()) {\n                viewScheduledMessages(true);\n              }',
+    '              if (false && !areScheduled && isSchedule && isFocused()) {\n                viewScheduledMessages(true);\n              }'
 )
 
 # ==============================================================================
