@@ -120,7 +120,7 @@ patch(
 )
 
 # ==============================================================================
-# 4. MessagesController.java — Скриншоты, отмена "печатает", авто-отложка на +20 сек
+# 4. MessagesController.java — Скриншоты, "печатает", 2-этапная авто-отложка (+24ч -> +16..50с)
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/ui/MessagesController.java',
@@ -138,10 +138,8 @@ patch(
     '  private void send (TdApi.MessageSendOptions sendOptions) {\n    send(sendOptions, true);\n  }',
     """  private void send (TdApi.MessageSendOptions sendOptions) {
     if (sendOptions == null && chat != null && !isSecretChat() && !isSelfChat()) {
-      TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-      state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
       sendOptions = new TdApi.MessageSendOptions();
-      sendOptions.schedulingState = state;
+      sendOptions.schedulingState = tdlib.newAutoScheduleState(true);
     }
     send(sendOptions, true);
   }"""
@@ -152,9 +150,7 @@ patch(
     '    } else {\n      sendCallback.onSendRequested(initialSendOptions, false);\n    }',
     """    } else {
       if (initialSendOptions.schedulingState == null && chat != null && !isSecretChat() && !isSelfChat()) {
-        TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-        state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-        initialSendOptions.schedulingState = state;
+        initialSendOptions.schedulingState = tdlib.newAutoScheduleState(true);
       }
       sendCallback.onSendRequested(initialSendOptions, false);
     }"""
@@ -169,9 +165,7 @@ patch(
       obtainSilentMode()
     );
     if (finalSendOptions.schedulingState == null && chat != null && !isSecretChat() && !isSelfChat()) {
-      TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-      state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-      finalSendOptions.schedulingState = state;
+      finalSendOptions.schedulingState = tdlib.newAutoScheduleState(true);
     }"""
 )
 
@@ -183,7 +177,7 @@ patch(
 )
 
 # ==============================================================================
-# 5. Tdlib.java — Глобальный Interceptor: авто-отложка для пересылки, войсов и всего остального
+# 5. Tdlib.java — Глобальный Interceptor: +24ч для загрузок, +16..50с для пересылки
 # ==============================================================================
 album_branch = ""
 if has_send_album:
@@ -194,9 +188,7 @@ if has_send_album:
               sa.options = new TdApi.MessageSendOptions();
             }
             if (sa.options.schedulingState == null) {
-              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-              sa.options.schedulingState = state;
+              sa.options.schedulingState = tdlib.newAutoScheduleState(true);
             }
           }
         }"""
@@ -210,9 +202,7 @@ interceptor_code = f"""      tdlib.context.modifyClient(tdlib, client);
               sm.options = new TdApi.MessageSendOptions();
             }}
             if (sm.options.schedulingState == null) {{
-              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-              sm.options.schedulingState = state;
+              sm.options.schedulingState = tdlib.newAutoScheduleState(true);
             }}
           }}
         }} else if (query instanceof TdApi.ForwardMessages) {{
@@ -222,9 +212,7 @@ interceptor_code = f"""      tdlib.context.modifyClient(tdlib, client);
               fm.options = new TdApi.MessageSendOptions();
             }}
             if (fm.options.schedulingState == null) {{
-              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-              fm.options.schedulingState = state;
+              fm.options.schedulingState = tdlib.newAutoScheduleState(false);
             }}
           }}
         }} else if (query instanceof TdApi.SendInlineQueryResultMessage) {{
@@ -234,9 +222,7 @@ interceptor_code = f"""      tdlib.context.modifyClient(tdlib, client);
               iq.options = new TdApi.MessageSendOptions();
             }}
             if (iq.options.schedulingState == null) {{
-              TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
-              state.sendDate = (int) (tdlib.currentTime(TimeUnit.SECONDS) + 20);
-              iq.options.schedulingState = state;
+              iq.options.schedulingState = tdlib.newAutoScheduleState(false);
             }}
           }}
         }}{album_branch}
@@ -337,7 +323,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. Tdlib.java — Вечный оффлайн + сброс онлайна (кроме отложенных и Избранного!)
+# 14. Tdlib.java — Вечный оффлайн + 2-этапная перепланировка после загрузки
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -352,7 +338,24 @@ patch(
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'public void setOnline (boolean isOnline) {',
-    """public void forceOffline () {
+    """private final Set<Integer> autoScheduledDates = Collections.synchronizedSet(new HashSet<>());
+  private final Set<Long> editedAlbumIds = Collections.synchronizedSet(new HashSet<>());
+
+  public TdApi.MessageSchedulingStateSendAtDate newAutoScheduleState (boolean waitForUpload) {
+    int delay = waitForUpload ? 86400 : MathUtils.random(16, 50);
+    int sendDate = (int) (currentTime(TimeUnit.SECONDS) + delay);
+    if (waitForUpload) {
+      if (autoScheduledDates.size() > 200) {
+        autoScheduledDates.clear();
+      }
+      autoScheduledDates.add(sendDate);
+    }
+    TdApi.MessageSchedulingStateSendAtDate state = new TdApi.MessageSchedulingStateSendAtDate();
+    state.sendDate = sendDate;
+    return state;
+  }
+
+  public void forceOffline () {
     performOptional(c -> c.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(true)), r ->
       c.send(new TdApi.SetOption("online", new TdApi.OptionValueBoolean(false)), silentHandler())
     ), null);
@@ -374,7 +377,22 @@ patch(
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
     'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {',
-    'private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {\n    if (update.message.schedulingState == null && !isSelfChat(update.message.chatId)) {\n      forceOffline();\n    }'
+    """private void updateMessageSendSucceeded (TdApi.UpdateMessageSendSucceeded update) {
+    if (update.message.schedulingState == null && !isSelfChat(update.message.chatId)) {
+      forceOffline();
+    } else if (update.message.schedulingState instanceof TdApi.MessageSchedulingStateSendAtDate) {
+      int scheduledAt = ((TdApi.MessageSchedulingStateSendAtDate) update.message.schedulingState).sendDate;
+      if (autoScheduledDates.contains(scheduledAt)) {
+        if (editedAlbumIds.size() > 200) {
+          editedAlbumIds.clear();
+        }
+        if (update.message.mediaAlbumId == 0 || editedAlbumIds.add(update.message.mediaAlbumId)) {
+          TdApi.MessageSchedulingStateSendAtDate newState = new TdApi.MessageSchedulingStateSendAtDate();
+          newState.sendDate = (int) (currentTime(TimeUnit.SECONDS) + MathUtils.random(16, 50));
+          client().send(new TdApi.EditMessageSchedulingState(update.message.chatId, update.message.id, newState), silentHandler());
+        }
+      }
+    }"""
 )
 
 # ==============================================================================
