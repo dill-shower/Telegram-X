@@ -19,7 +19,8 @@ def patch(file_path, old_str, new_str):
     print(f"[+] Successfully patched: {file_path}")
 
 # ==============================================================================
-# 0. Client.java (Шлюз TDLib) — Глобальный перехватчик всех нежелательных запросов
+# 0. Client.java (Шлюз TDLib) — Глобальный перехватчик
+#    (OpenChat/CloseChat убраны из бана, чтобы обновлялись чужие каналы!)
 # ==============================================================================
 client_path = 'tdlib/src/main/java/org/drinkless/tdlib/Client.java'
 tdapi_path = None
@@ -31,8 +32,6 @@ for root, _, files in os.walk('tdlib'):
 candidates = [
     'OpenStory',
     'CloseStory',
-    'OpenChat',
-    'CloseChat',
     'OpenChatSimilarChat',
     'OpenBotSimilarBot',
     'SendChatAction',
@@ -54,11 +53,13 @@ if tdapi_path and os.path.exists(tdapi_path):
             print(f"[i] Skipped TdApi.{cls} (not found as Function<Ok> in TdApi.java)")
     has_send_album = 'class SendMessageAlbum ' in tdapi_code
 else:
-    verified_classes = ['OpenChat', 'CloseChat', 'OpenChatSimilarChat', 'OpenBotSimilarBot', 'SendChatAction']
+    verified_classes = ['OpenChatSimilarChat', 'OpenBotSimilarBot', 'SendChatAction']
 
 if verified_classes and os.path.exists(client_path):
     checks = [f'query instanceof TdApi.{cls}' for cls in verified_classes]
+    # Блокируем отчёты о скриншотах и авто-прочтение при ответе из уведомлений
     checks.append('(query instanceof TdApi.ViewMessages && ((TdApi.ViewMessages) query).source instanceof TdApi.MessageSourceScreenshot)')
+    checks.append('(query instanceof TdApi.ViewMessages && ((TdApi.ViewMessages) query).source instanceof TdApi.MessageSourceNotification)')
     condition_str = '\n            || '.join(checks)
     
     gateway_code = (
@@ -74,7 +75,7 @@ if verified_classes and os.path.exists(client_path):
         'public void send(TdApi.Function<?> query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {',
         gateway_code
     )
-    print(f"[+] Client.java gateway blocking: {', '.join(verified_classes)}")
+    print(f"[+] Client.java gateway blocking: {', '.join(verified_classes)} + Screenshot/Notification ViewMessages")
 
 # ==============================================================================
 # 1. MessagesLoader.java — Блокировка рекламы + Режим призрака (источник Preview)
@@ -323,7 +324,7 @@ patch(
 )
 
 # ==============================================================================
-# 14. Tdlib.java — Вечный оффлайн + 2-этапная перепланировка после загрузки
+# 14. Tdlib.java — Вечный оффлайн + 2-этапная перепланировка с safeNowSeconds()
 # ==============================================================================
 patch(
     'app/src/main/java/org/thunderdog/challegram/telegram/Tdlib.java',
@@ -341,9 +342,14 @@ patch(
     """private final Set<Integer> autoScheduledDates = Collections.synchronizedSet(new HashSet<>());
   private final Set<Long> editedAlbumIds = Collections.synchronizedSet(new HashSet<>());
 
+  public long safeNowSeconds () {
+    long now = currentTime(TimeUnit.SECONDS);
+    return now < 1700000000L ? (System.currentTimeMillis() / 1000L) : now;
+  }
+
   public TdApi.MessageSchedulingStateSendAtDate newAutoScheduleState (boolean waitForUpload) {
     int delay = waitForUpload ? 86400 : MathUtils.random(16, 50);
-    int sendDate = (int) (currentTime(TimeUnit.SECONDS) + delay);
+    int sendDate = (int) (safeNowSeconds() + delay);
     if (waitForUpload) {
       if (autoScheduledDates.size() > 200) {
         autoScheduledDates.clear();
@@ -388,7 +394,7 @@ patch(
         }
         if (update.message.mediaAlbumId == 0 || editedAlbumIds.add(update.message.mediaAlbumId)) {
           TdApi.MessageSchedulingStateSendAtDate newState = new TdApi.MessageSchedulingStateSendAtDate();
-          newState.sendDate = (int) (currentTime(TimeUnit.SECONDS) + MathUtils.random(16, 50));
+          newState.sendDate = (int) (safeNowSeconds() + MathUtils.random(16, 50));
           client().send(new TdApi.EditMessageSchedulingState(update.message.chatId, update.message.id, newState), silentHandler());
         }
       }
@@ -425,5 +431,17 @@ add_link_options(-flto=thin -Wl,--thinlto-jobs=4 -Wl,-O3)
         print(f"[+] Successfully injected Tensor G3 (ARMv9 -O3 ThinLTO) flags into {cmake_path}")
     else:
         print(f"[!] Warning: cmake_minimum_required not found in {cmake_path}")
+
+# ==============================================================================
+# Диагностика ответа из уведомлений (для контроля в логе Actions)
+# ==============================================================================
+for root, _, files in os.walk('app/src/main'):
+    for file in files:
+        if ('Notification' in file or 'Sync' in file) and file.endswith(('.java', '.kt')):
+            fp = os.path.join(root, file)
+            with open(fp, 'r', encoding='utf-8') as f:
+                for idx, line in enumerate(f, 1):
+                    if 'SendMessage' in line or 'RemoteInput' in line:
+                        print(f"[i] Notification reply ref at {fp}:{idx}: {line.strip()}")
 
 print("[*] All patches applied successfully!")
